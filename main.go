@@ -207,11 +207,11 @@ func main() {
 
 	timeEnd := time.Now()
 
-	fmt.Printf("Found %d package.json files in %s\n", len(filepaths), timeEnd.Sub(timeStart).String())
-
 	idx, err := fuzzyfinder.Find(allScripts, func(i int) string {
 		return fmt.Sprintf("%s > (%s)", allScripts[i].PackageName, allScripts[i].ScriptName)
 	})
+
+	fmt.Printf("Found %d package.json files in %s\n", len(filepaths), timeEnd.Sub(timeStart).String())
 
 	if err != nil {
 		fmt.Println("Error:", err)
