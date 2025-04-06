@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	// "github.com/ktr0731/go-fuzzyfinder"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"io"
 	"os"
@@ -145,16 +144,44 @@ func extractScriptsFromPackageJSONsConcurrent(filepaths []string) []NpmScript {
 	return allScripts
 }
 
+func inferPackageManager(filePath string) string {
+	knownLockFiles := map[string]string{
+		"package-lock.json": "npm",
+		"yarn.lock":         "yarn",
+		"pnpm-lock.yaml":    "pnpm",
+		"bun.lock":          "bun",
+		"bun.lockb":         "bun",
+	}
+
+	dir := filepath.Dir(filePath)
+	for dir != "." {
+		for lockFile, pkgManager := range knownLockFiles {
+			if _, err := os.Stat(filepath.Join(dir, lockFile)); err == nil {
+				return pkgManager
+			}
+		}
+		dir = filepath.Dir(dir)
+	}
+	return "npm"
+
+}
+
 func runScript(script NpmScript) {
-	cmd := exec.Command("npm", "run", script.ScriptName)
+	packageManager := inferPackageManager(script.AbsolutePath)
+	cmd := exec.Command(packageManager, "run", script.ScriptName)
 
 	cmd.Dir = filepath.Dir(script.AbsolutePath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		fmt.Printf("Error executing script: %v\n", err)
-		os.Exit(1)
+		if exitError, ok := err.(*exec.ExitError); ok {
+			// exit with the same exit code as the command
+			os.Exit(exitError.ExitCode())
+		} else {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
