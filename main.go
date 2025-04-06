@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"bytes"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"io"
 	"os"
@@ -63,12 +64,35 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 	for _, entry := range entries {
 		if entry.IsDir() && entry.Name() != "node_modules" && entry.Name() != ".git" {
 			// If the entry is a directory, launch a new goroutine
-			entryPath := path + "/" + entry.Name()
-			wg.Add(1)
-			go findPackageJSON(entryPath, paths, wg)
+			dirPath := filepath.Join(path, entry.Name())
+
+			packageJsonPath := filepath.Join(dirPath, "package.json")
+			// If package.json file is in the directory, we might be able to stop here
+			if _, err := os.Stat(packageJsonPath); err == nil {
+				paths <- packageJsonPath
+
+				file, err := os.Open(packageJsonPath)
+				if err != nil {
+					return
+				}
+				defer file.Close()
+
+				jsonData, err := io.ReadAll(file)
+				if err != nil {
+					return
+				}
+				// If workspaces are specified, need to traverse further
+				if bytes.Contains(jsonData, []byte("\"workspaces\":")) {
+					wg.Add(1)
+					go findPackageJSON(dirPath, paths, wg)
+				}
+			} else {
+				wg.Add(1)
+				go findPackageJSON(dirPath, paths, wg)
+			}
 		} else if entry.Name() == "package.json" {
 			// If the entry is a package.json file, send its path to the channel
-			paths <- path + "/" + entry.Name()
+			paths <- filepath.Join(path, entry.Name())
 		}
 	}
 }
