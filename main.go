@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"bytes"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"io"
 	"os"
@@ -70,22 +70,6 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 			// If package.json file is in the directory, we might be able to stop here
 			if _, err := os.Stat(packageJsonPath); err == nil {
 				paths <- packageJsonPath
-
-				file, err := os.Open(packageJsonPath)
-				if err != nil {
-					return
-				}
-				defer file.Close()
-
-				jsonData, err := io.ReadAll(file)
-				if err != nil {
-					return
-				}
-				// If workspaces are specified, need to traverse further
-				if bytes.Contains(jsonData, []byte("\"workspaces\":")) {
-					wg.Add(1)
-					go findPackageJSON(dirPath, paths, wg)
-				}
 			} else {
 				wg.Add(1)
 				go findPackageJSON(dirPath, paths, wg)
@@ -129,6 +113,48 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 	if scriptsMap, ok := packageJSON["scripts"].(map[string]any); ok {
 		for name, command := range scriptsMap {
 			scripts = append(scripts, NpmScript{PackageName: packageName, ScriptName: name, Command: command.(string), AbsolutePath: filePath})
+		}
+	}
+
+	if workspaces, ok := packageJSON["workspaces"].([]any); ok {
+		for _, workspace := range workspaces {
+			isGlob := strings.ContainsAny(workspace.(string), "*?[")
+			workspacePath := filepath.Join(filepath.Dir(filePath), workspace.(string))
+
+			if isGlob {
+				// If the workspace is a glob pattern, find all matching directories
+				matches, err := filepath.Glob(workspacePath)
+				if err != nil {
+					continue
+				}
+				for _, match := range matches {
+					workspacePackageJSONPath := filepath.Join(match, "package.json")
+					if _, err := os.Stat(workspacePackageJSONPath); err == nil {
+						workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+						if err == nil {
+							scripts = append(scripts, workspaceScripts...)
+						}
+					}
+				}
+			} else {
+				// If the workspace is a directory, check if package.json exists
+				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
+				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
+					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+					if err == nil {
+						scripts = append(scripts, workspaceScripts...)
+					}
+				}
+			}
+
+			// if workspace path exists, extract scripts from it's package.json
+			if _, err := os.Stat(workspacePath); err == nil {
+				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
+				workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+				if err == nil {
+					scripts = append(scripts, workspaceScripts...)
+				}
+			}
 		}
 	}
 
