@@ -264,7 +264,9 @@ func main() {
 	fmt.Printf("Found %d package.json files in %s\n", len(filepaths), timeEnd.Sub(timeStart).String())
 
 	if err != nil {
-		fmt.Println("Error:", err)
+		if err != fuzzyfinder.ErrAbort {
+			fmt.Println("Error:", err)
+		}
 		return
 	}
 
