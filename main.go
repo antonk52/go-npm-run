@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ktr0731/go-fuzzyfinder"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/ktr0731/go-fuzzyfinder"
+	"gopkg.in/yaml.v2"
 )
 
 type NpmScript struct {
@@ -19,6 +21,11 @@ type NpmScript struct {
 	ScriptName   string
 	Command      string
 	AbsolutePath string
+}
+
+// Workspace represents the structure of the pnpm-workspace.yaml file.
+type pnpmWorkspace struct {
+	Packages []string `yaml:"packages"`
 }
 
 // Concurrent version of finding package.json files
@@ -79,6 +86,80 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 			paths <- filepath.Join(path, entry.Name())
 		}
 	}
+}
+
+func locatePnpmWorkspaces(pnpmWorkspaceRoot string) ([]string, error) {
+	file, err := os.Open(pnpmWorkspaceRoot + "/pnpm-workspace.yaml")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("reading pnpm workspace file: %w", err)
+	}
+
+	// Unmarshal YAML into our Workspace struct.
+	var ws pnpmWorkspace
+	if err := yaml.Unmarshal(data, &ws); err != nil {
+		return nil, fmt.Errorf("parsing YAML: %w", err)
+	}
+
+	var includePatterns []string
+	var excludePatterns []string
+
+	// Separate inclusion and exclusion patterns.
+	for _, pattern := range ws.Packages {
+		trimmed := strings.TrimSpace(pattern)
+		if strings.HasPrefix(trimmed, "!") {
+			// Exclusion pattern (remove the "!" prefix).
+			name := filepath.Join(pnpmWorkspaceRoot, strings.TrimPrefix(trimmed, "!"))
+			excludePatterns = append(excludePatterns, name)
+		} else {
+			includePatterns = append(includePatterns, filepath.Join(pnpmWorkspaceRoot, trimmed))
+		}
+	}
+
+	// Build a set (map) to store matching workspaces.
+	matchesSet := make(map[string]bool)
+
+	// Process include patterns.
+	for _, pattern := range includePatterns {
+		// filepath.Glob returns only existing paths that match the given pattern.
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("expanding include pattern %q: %w", pattern, err)
+		}
+		for _, match := range matches {
+			// Optionally, you can check if the match is a directory.
+			if info, err := os.Stat(match); err == nil && info.IsDir() {
+				matchesSet[match] = true
+			} else if err == nil {
+				// The item exists, even if it is not a directory.
+				matchesSet[match] = true
+			}
+		}
+	}
+
+	// Process exclusion patterns.
+	for _, pattern := range excludePatterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("expanding exclude pattern %q: %w", pattern, err)
+		}
+		for _, match := range matches {
+			delete(matchesSet, match)
+		}
+	}
+
+	// Convert the set of matches to a slice.
+	var result []string
+	for match := range matchesSet {
+		result = append(result, match)
+	}
+
+	return result, nil
 }
 
 func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
@@ -153,6 +234,29 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 				workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
 				if err == nil {
 					scripts = append(scripts, workspaceScripts...)
+				}
+			}
+		}
+	}
+
+	dirname := filepath.Dir(filePath)
+	pnpmWorkspacePath := filepath.Join(dirname, "pnpm-workspace.yaml")
+
+	if _, err := os.Stat(pnpmWorkspacePath); err == nil {
+
+		if result, err := locatePnpmWorkspaces(dirname); err == nil {
+			// Iterate over the matches and extract scripts from each package.json.
+			for _, match := range result {
+				workspacePackageJSONPath := filepath.Join(match, "package.json")
+				// Skip the current package.json
+				if workspacePackageJSONPath == filePath {
+					continue
+				}
+				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
+					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+					if err == nil {
+						scripts = append(scripts, workspaceScripts...)
+					}
 				}
 			}
 		}
