@@ -68,6 +68,14 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 		return
 	}
 
+	// If package.json file is in the currently searched directory
+	// we can stop the search here
+	dirPackageJSONPath := filepath.Join(path, "package.json")
+	if _, err := os.Stat(dirPackageJSONPath); err == nil {
+		paths <- dirPackageJSONPath
+		return
+	}
+
 	for _, entry := range entries {
 		if entry.IsDir() && entry.Name() != "node_modules" && entry.Name() != ".git" {
 			// If the entry is a directory, launch a new goroutine
@@ -81,9 +89,6 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 				wg.Add(1)
 				go findPackageJSON(dirPath, paths, wg)
 			}
-		} else if entry.Name() == "package.json" {
-			// If the entry is a package.json file, send its path to the channel
-			paths <- filepath.Join(path, entry.Name())
 		}
 	}
 }
@@ -206,6 +211,9 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 	}
 
 	if workspaces, ok := packageJSON["workspaces"].([]any); ok {
+		// define map of already handled workspaces
+		knownWorkspaces := make(map[string]bool)
+
 		for _, workspace := range workspaces {
 			isGlob := strings.ContainsAny(workspace.(string), "*?[")
 			workspacePath := filepath.Join(filepath.Dir(filePath), workspace.(string))
@@ -218,6 +226,10 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 				}
 				for _, match := range matches {
 					workspacePackageJSONPath := filepath.Join(match, "package.json")
+					if knownWorkspaces[workspacePackageJSONPath] {
+						continue
+					}
+					knownWorkspaces[workspacePackageJSONPath] = true
 					if _, err := os.Stat(workspacePackageJSONPath); err == nil {
 						wg.Add(1)
 						go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
@@ -226,17 +238,14 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 			} else {
 				// If the workspace is a directory, check if package.json exists
 				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
+				if knownWorkspaces[workspacePackageJSONPath] {
+					continue
+				}
+				knownWorkspaces[workspacePackageJSONPath] = true
 				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
 					wg.Add(1)
 					go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 				}
-			}
-
-			// if workspace path exists, extract scripts from it's package.json
-			if _, err := os.Stat(workspacePath); err == nil {
-				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
-				wg.Add(1)
-				go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 			}
 		}
 	}
