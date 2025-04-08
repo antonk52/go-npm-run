@@ -22,7 +22,7 @@ type NpmScript struct {
 }
 
 // Concurrent version of finding package.json files
-func findPackageJSONPathsConcurrent(rootPath string) []string {
+func findProjectRootPackageJSONPathsConcurrent(rootPath string) []string {
 	var wg sync.WaitGroup
 	pathsChan := make(chan string, 100) // Buffered channel to prevent blocking
 
@@ -244,16 +244,16 @@ func main() {
 	}
 
 	// Use the concurrent version to find package.json files
-	filepaths := findPackageJSONPathsConcurrent(searchPath)
+	projectRootPackageJsons := findProjectRootPackageJSONPathsConcurrent(searchPath)
 
-	if len(filepaths) == 0 {
+	if len(projectRootPackageJsons) == 0 {
 		fmt.Println("No package.json files found.")
 		os.Exit(1)
 		return
 	}
 
 	// Use the concurrent version to extract scripts from package.json files
-	allScripts := extractScriptsFromPackageJSONsConcurrent(filepaths)
+	allScripts := extractScriptsFromPackageJSONsConcurrent(projectRootPackageJsons)
 
 	timeEnd := time.Now()
 
@@ -261,7 +261,7 @@ func main() {
 		return fmt.Sprintf("%s > (%s)", allScripts[i].PackageName, allScripts[i].ScriptName)
 	})
 
-	fmt.Printf("Found %d package.json files in %s\n", len(filepaths), timeEnd.Sub(timeStart).String())
+	fmt.Printf("Found %d projects in %s\n", len(projectRootPackageJsons), timeEnd.Sub(timeStart).String())
 
 	if err != nil {
 		if err != fuzzyfinder.ErrAbort {
