@@ -162,7 +162,7 @@ func locatePnpmWorkspaces(pnpmWorkspaceRoot string) ([]string, error) {
 	return result, nil
 }
 
-func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
+func extractScriptsFromPackageJSON(filePath string, isLeaf bool) ([]NpmScript, error) {
 	var scripts []NpmScript
 	// Open the package.json file
 	file, err := os.Open(filePath)
@@ -197,6 +197,10 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 		}
 	}
 
+	if isLeaf {
+		return scripts, nil
+	}
+
 	if workspaces, ok := packageJSON["workspaces"].([]any); ok {
 		for _, workspace := range workspaces {
 			isGlob := strings.ContainsAny(workspace.(string), "*?[")
@@ -211,7 +215,7 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 				for _, match := range matches {
 					workspacePackageJSONPath := filepath.Join(match, "package.json")
 					if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-						workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+						workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
 						if err == nil {
 							scripts = append(scripts, workspaceScripts...)
 						}
@@ -221,7 +225,7 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 				// If the workspace is a directory, check if package.json exists
 				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
 				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
 					if err == nil {
 						scripts = append(scripts, workspaceScripts...)
 					}
@@ -231,7 +235,7 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 			// if workspace path exists, extract scripts from it's package.json
 			if _, err := os.Stat(workspacePath); err == nil {
 				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
-				workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+				workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
 				if err == nil {
 					scripts = append(scripts, workspaceScripts...)
 				}
@@ -253,7 +257,7 @@ func extractScriptsFromPackageJSON(filePath string) ([]NpmScript, error) {
 					continue
 				}
 				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath)
+					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
 					if err == nil {
 						scripts = append(scripts, workspaceScripts...)
 					}
@@ -274,7 +278,7 @@ func extractScriptsFromPackageJSONsConcurrent(filepaths []string) []NpmScript {
 		// Launch a goroutine for each package.json file
 		go func(filePath string) {
 			defer wg.Done()
-			scripts, err := extractScriptsFromPackageJSON(filePath)
+			scripts, err := extractScriptsFromPackageJSON(filePath, false)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
