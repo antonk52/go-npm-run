@@ -162,26 +162,28 @@ func locatePnpmWorkspaces(pnpmWorkspaceRoot string) ([]string, error) {
 	return result, nil
 }
 
-func extractScriptsFromPackageJSON(filePath string, isLeaf bool) ([]NpmScript, error) {
+func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan chan<- []NpmScript, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	var scripts []NpmScript
 	// Open the package.json file
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer file.Close()
 
 	// Read the file content
 	byteValue, err := io.ReadAll(file)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	// Unmarshal the JSON content
 	var packageJSON map[string]any
 	err = json.Unmarshal(byteValue, &packageJSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
+		return
 	}
 
 	packageName := "unknown"
@@ -195,10 +197,12 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool) ([]NpmScript, e
 		for name, command := range scriptsMap {
 			scripts = append(scripts, NpmScript{PackageName: packageName, ScriptName: name, Command: command.(string), AbsolutePath: filePath})
 		}
+
+		scriptsChan <- scripts
 	}
 
 	if isLeaf {
-		return scripts, nil
+		return
 	}
 
 	if workspaces, ok := packageJSON["workspaces"].([]any); ok {
@@ -215,30 +219,24 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool) ([]NpmScript, e
 				for _, match := range matches {
 					workspacePackageJSONPath := filepath.Join(match, "package.json")
 					if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-						workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
-						if err == nil {
-							scripts = append(scripts, workspaceScripts...)
-						}
+						wg.Add(1)
+						go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 					}
 				}
 			} else {
 				// If the workspace is a directory, check if package.json exists
 				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
 				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
-					if err == nil {
-						scripts = append(scripts, workspaceScripts...)
-					}
+					wg.Add(1)
+					go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 				}
 			}
 
 			// if workspace path exists, extract scripts from it's package.json
 			if _, err := os.Stat(workspacePath); err == nil {
 				workspacePackageJSONPath := filepath.Join(workspacePath, "package.json")
-				workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
-				if err == nil {
-					scripts = append(scripts, workspaceScripts...)
-				}
+				wg.Add(1)
+				go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 			}
 		}
 	}
@@ -257,16 +255,12 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool) ([]NpmScript, e
 					continue
 				}
 				if _, err := os.Stat(workspacePackageJSONPath); err == nil {
-					workspaceScripts, err := extractScriptsFromPackageJSON(workspacePackageJSONPath, true)
-					if err == nil {
-						scripts = append(scripts, workspaceScripts...)
-					}
+					wg.Add(1)
+					go extractScriptsFromPackageJSON(workspacePackageJSONPath, true, scriptsChan, wg)
 				}
 			}
 		}
 	}
-
-	return scripts, nil
 }
 
 func extractScriptsFromPackageJSONsConcurrent(filepaths []string) []NpmScript {
@@ -275,16 +269,7 @@ func extractScriptsFromPackageJSONsConcurrent(filepaths []string) []NpmScript {
 
 	for _, path := range filepaths {
 		wg.Add(1)
-		// Launch a goroutine for each package.json file
-		go func(filePath string) {
-			defer wg.Done()
-			scripts, err := extractScriptsFromPackageJSON(filePath, false)
-			if err != nil {
-				fmt.Println("Error:", err)
-				return
-			}
-			scriptsChan <- scripts
-		}(path)
+		go extractScriptsFromPackageJSON(path, false, scriptsChan, &wg)
 	}
 
 	// Wait for all goroutines to finish in a separate goroutine
