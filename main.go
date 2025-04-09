@@ -209,14 +209,34 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 	if isLeaf {
 		return
 	}
-
-	if workspaces, ok := packageJSON["workspaces"].([]any); ok {
-		// define map of already handled workspaces
+	// Check for workspaces in different formats
+	var workspacePatterns []string
+	
+	// Check for array format: "workspaces": ["packages/*"]
+	if workspacesArray, ok := packageJSON["workspaces"].([]any); ok {
+		for _, workspace := range workspacesArray {
+			if wsStr, ok := workspace.(string); ok {
+				workspacePatterns = append(workspacePatterns, wsStr)
+			}
+		}
+	} else if workspacesObj, ok := packageJSON["workspaces"].(map[string]any); ok {
+		// Check for object format: "workspaces": { "packages": ["packages/*"] }
+		if packagesArray, ok := workspacesObj["packages"].([]any); ok {
+			for _, pkg := range packagesArray {
+				if pkgStr, ok := pkg.(string); ok {
+					workspacePatterns = append(workspacePatterns, pkgStr)
+				}
+			}
+		}
+	}
+	
+	// Process the workspace patterns
+	if len(workspacePatterns) > 0 {
 		knownWorkspaces := make(map[string]bool)
-
-		for _, workspace := range workspaces {
-			isGlob := strings.ContainsAny(workspace.(string), "*?[")
-			workspacePath := filepath.Join(filepath.Dir(filePath), workspace.(string))
+		
+		for _, workspacePattern := range workspacePatterns {
+			isGlob := strings.ContainsAny(workspacePattern, "*?[")
+			workspacePath := filepath.Join(filepath.Dir(filePath), workspacePattern)
 
 			if isGlob {
 				// If the workspace is a glob pattern, find all matching directories
