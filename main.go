@@ -52,6 +52,29 @@ func findProjectRootPackageJSONPathsConcurrent(rootPath string) []string {
 	return filepaths
 }
 
+var ignoredDirs map[string]bool = map[string]bool{
+	".circleci": true,
+	".github":   true,
+
+	".git": true,
+	".hg":  true,
+	".svn": true,
+
+	".idea":   true,
+	".vscode": true,
+
+	"node_modules": true,
+
+	"__tests__":     true,
+	"__test__":      true,
+	"__specs__":     true,
+	"__spec__":      true,
+	"__mocks__":     true,
+	"__mock__":      true,
+	"__snapshots__": true,
+	"__fixtures__":  true,
+}
+
 func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -77,8 +100,7 @@ func findPackageJSON(path string, paths chan<- string, wg *sync.WaitGroup) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != "node_modules" && entry.Name() != ".git" {
-			// If the entry is a directory, launch a new goroutine
+		if entry.IsDir() && !ignoredDirs[entry.Name()] {
 			dirPath := filepath.Join(path, entry.Name())
 
 			packageJsonPath := filepath.Join(dirPath, "package.json")
@@ -211,7 +233,7 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 	}
 	// Check for workspaces in different formats
 	var workspacePatterns []string
-	
+
 	// Check for array format: "workspaces": ["packages/*"]
 	if workspacesArray, ok := packageJSON["workspaces"].([]any); ok {
 		for _, workspace := range workspacesArray {
@@ -229,11 +251,11 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 			}
 		}
 	}
-	
+
 	// Process the workspace patterns
 	if len(workspacePatterns) > 0 {
 		knownWorkspaces := make(map[string]bool)
-		
+
 		for _, workspacePattern := range workspacePatterns {
 			isGlob := strings.ContainsAny(workspacePattern, "*?[")
 			workspacePath := filepath.Join(filepath.Dir(filePath), workspacePattern)
