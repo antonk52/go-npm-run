@@ -362,7 +362,13 @@ func inferPackageManager(filePath string) string {
 
 func runScript(script NpmScript) {
 	packageManager := inferPackageManager(script.AbsolutePath)
-	cmd := exec.Command(packageManager, "run", script.ScriptName)
+	cmdName := packageManager
+	run := "run"
+	if packageManager == "npm" {
+		cmdName = "node"
+		run = "--run"
+	}
+	cmd := exec.Command(cmdName, run, script.ScriptName)
 
 	cmd.Dir = filepath.Dir(script.AbsolutePath)
 	cmd.Stdout = os.Stdout
