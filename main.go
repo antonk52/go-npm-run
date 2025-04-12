@@ -234,15 +234,11 @@ func extractScriptsFromPackageJSON(filePath string, isLeaf bool, scriptsChan cha
 	// Check for workspaces in different formats
 	var workspacePatterns []string
 
-	// Check for array format: "workspaces": ["packages/*"]
-	if workspacesArray, ok := packageJSON["workspaces"].([]any); ok {
-		for _, workspace := range workspacesArray {
-			if wsStr, ok := workspace.(string); ok {
-				workspacePatterns = append(workspacePatterns, wsStr)
-			}
-		}
-	} else if workspacesObj, ok := packageJSON["workspaces"].(map[string]any); ok {
-		// Check for object format: "workspaces": { "packages": ["packages/*"] }
+	switch packageJSON["workspaces"].(type) {
+	case []string:
+		workspacePatterns = append(workspacePatterns, packageJSON["workspaces"].([]string)...)
+	case map[string]any:
+		workspacesObj := packageJSON["workspaces"].(map[string]any)
 		if packagesArray, ok := workspacesObj["packages"].([]any); ok {
 			for _, pkg := range packagesArray {
 				if pkgStr, ok := pkg.(string); ok {
@@ -357,7 +353,6 @@ func inferPackageManager(filePath string) string {
 		dir = filepath.Dir(dir)
 	}
 	return "npm"
-
 }
 
 func runScript(script NpmScript) {
